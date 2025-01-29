@@ -188,8 +188,8 @@ struct ContentView: View {
     
     private func copyToClipboard(prompt: String, response: String) {
         // Format text as <input>\n<response>
-//        let formattedText = "\(prompt)\n\(response)"
-        let formattedText = "\(response)"
+        let formattedText = "\(prompt)\n\(response)"
+//        let formattedText = "\(response)"
 
         #if os(macOS)
             NSPasteboard.general.clearContents()
