@@ -21,6 +21,9 @@ struct ContentView: View {
     }
 
     @State private var selectedDisplayStyle = displayStyle.markdown
+    
+    // Controls the ephemeral "Copied!" animation
+    @State private var showCopyConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -55,26 +58,60 @@ struct ContentView: View {
                     #endif
                 }
             }
+            // Use a ZStack so we can overlay the ephemeral "Copied!" message
+            ZStack {
+                // Scrollable area for the output
+                // show the model output
+                ScrollView(.vertical) {
+                    ScrollViewReader { sp in
+                        Group {
+                            if selectedDisplayStyle == .plain {
+                                Text(llm.output)
+                                    .textSelection(.enabled)
+                            } else {
+                                Markdown(llm.output)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .onChange(of: llm.output) { _, _ in
+                            sp.scrollTo("bottom")
+                        }
 
-            // show the model output
-            ScrollView(.vertical) {
-                ScrollViewReader { sp in
-                    Group {
-                        if selectedDisplayStyle == .plain {
-                            Text(llm.output)
-                                .textSelection(.enabled)
-                        } else {
-                            Markdown(llm.output)
-                                .textSelection(.enabled)
+                        Spacer()
+                            .frame(width: 1, height: 1)
+                            .id("bottom")
+                    }
+                }
+                // Detect tap on the entire scrollable area
+                .onTapGesture {
+                    guard !llm.output.isEmpty else { return }
+                    copyToClipboard(prompt: prompt, response: llm.output)
+
+                    // Trigger the "Copied!" animation
+                    withAnimation {
+                        showCopyConfirmation = true
+                    }
+                    // Hide the confirmation after 1.5 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        withAnimation {
+                            showCopyConfirmation = false
                         }
                     }
-                    .onChange(of: llm.output) { _, _ in
-                        sp.scrollTo("bottom")
+                }
+                
+                // Show ephemeral "Copied!" pop-up if tapped
+                if showCopyConfirmation {
+                    VStack {
+                        Label("Copied!", systemImage: "checkmark.circle.fill")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Color.green.opacity(0.9).cornerRadius(8))
+                            .transition(.scale.combined(with: .opacity))
                     }
-
-                    Spacer()
-                        .frame(width: 1, height: 1)
-                        .id("bottom")
+                    // Position it near the top (adjust to taste)
+                    .padding(.top, 30)
                 }
             }
 
@@ -115,12 +152,14 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task {
-                        copyToClipboard(llm.output)
+                        copyToClipboard(prompt: prompt, response: llm.output)
+//                        copyToClipboard(llm.output)
                     }
                 } label: {
                     Label("Copy Output", systemImage: "doc.on.doc.fill")
                 }
-                .disabled(llm.output == "")
+                .disabled(llm.output.isEmpty)
+//                .disabled(llm.output == "")
                 .labelStyle(.titleAndIcon)
             }
 
@@ -138,12 +177,25 @@ struct ContentView: View {
             await llm.generate(prompt: prompt)
         }
     }
-    private func copyToClipboard(_ string: String) {
+//    private func copyToClipboard(_ string: String) {
+//        #if os(macOS)
+//            NSPasteboard.general.clearContents()
+//            NSPasteboard.general.setString(string, forType: .string)
+//        #else
+//            UIPasteboard.general.string = string
+//        #endif
+//    }
+    
+    private func copyToClipboard(prompt: String, response: String) {
+        // Format text as <input>\n<response>
+//        let formattedText = "\(prompt)\n\(response)"
+        let formattedText = "\(response)"
+
         #if os(macOS)
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(string, forType: .string)
+            NSPasteboard.general.setString(formattedText, forType: .string)
         #else
-            UIPasteboard.general.string = string
+            UIPasteboard.general.string = formattedText
         #endif
     }
 }
