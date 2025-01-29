@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		C4C05B1F2D4A24410075726D /* MLXLLM in Frameworks */ = {isa = PBXBuildFile; productRef = C4C05B1E2D4A24410075726D /* MLXLLM */; };
+		C4C05B222D4A24BB0075726D /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = C4C05B212D4A24BB0075726D /* MarkdownUI */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		C4C05B0C2D4A24110075726D /* mlxllm.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = mlxllm.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +28,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C4C05B1F2D4A24410075726D /* MLXLLM in Frameworks */,
+				C4C05B222D4A24BB0075726D /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +72,8 @@
 			);
 			name = mlxllm;
 			packageProductDependencies = (
+				C4C05B1E2D4A24410075726D /* MLXLLM */,
+				C4C05B212D4A24BB0075726D /* MarkdownUI */,
 			);
 			productName = mlxllm;
 			productReference = C4C05B0C2D4A24110075726D /* mlxllm.app */;
@@ -94,6 +103,10 @@
 			);
 			mainGroup = C4C05B032D4A24110075726D;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C4C05B1D2D4A24410075726D /* XCRemoteSwiftPackageReference "mlx-swift-examples" */,
+				C4C05B202D4A24BB0075726D /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = C4C05B0D2D4A24110075726D /* Products */;
 			projectDirPath = "";
@@ -249,6 +262,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = mlxllm/mlxllm.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"mlxllm/Preview Content\"";
@@ -278,6 +292,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = mlxllm/mlxllm.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"mlxllm/Preview Content\"";
@@ -324,6 +339,38 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C4C05B1D2D4A24410075726D /* XCRemoteSwiftPackageReference "mlx-swift-examples" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/ml-explore/mlx-swift-examples.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.21.2;
+			};
+		};
+		C4C05B202D4A24BB0075726D /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jerryzhao173985/swift-markdown-ui";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C4C05B1E2D4A24410075726D /* MLXLLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C4C05B1D2D4A24410075726D /* XCRemoteSwiftPackageReference "mlx-swift-examples" */;
+			productName = MLXLLM;
+		};
+		C4C05B212D4A24BB0075726D /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C4C05B202D4A24BB0075726D /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = C4C05B042D4A24110075726D /* Project object */;
 }
