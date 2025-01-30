@@ -1,1 +1,3 @@
 # mlxllm
+load local model
+
