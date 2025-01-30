@@ -11,14 +11,14 @@ import Tokenizers
 import Hub
 
 
-// Model configuration setup
-let modelStorageDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("huggingface")
-let hubApi = HubApi(downloadBase: modelStorageDirectory)
+/// Model configuration setup
+//let modelStorageDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("huggingface")
+//let hubApi = HubApi(downloadBase: modelStorageDirectory)
 
 struct ContentView: View {
 
     @State var prompt = ""
-    @State var llm = LLMEvaluator()
+    @State var llm = LLMEvaluator(modelID: "jerryzhao173985/poems")
     @Environment(DeviceStat.self) private var deviceStat
 
     enum displayStyle: String, CaseIterable, Identifiable {
@@ -181,7 +181,7 @@ struct ContentView: View {
             self.prompt = "高跟鞋" /*llm.modelConfiguration.defaultPrompt*/
 
             // pre-load the weights on launch to speed up the first generation
-            _ = try? await llm.load(hub: hubApi)
+            _ = try? await llm.load()
         }
     }
 

@@ -10,15 +10,14 @@ import Metal
 import SwiftUI
 import Tokenizers
 
-//public let typeRegistry = LLMModelFactory.shared.typeRegistry
-//LLMModelFactory.shared.modelRegistry.configuration(
+// MARK: - A simple UserInputProcessor implementation
+// You can keep customizing this based on your needs.
 
 struct LLMUserInputProcessor: UserInputProcessor {
-
     let tokenizer: Tokenizer
     let configuration: ModelConfiguration
 
-    internal init(tokenizer: any Tokenizer, configuration: ModelConfiguration) {
+    init(tokenizer: any Tokenizer, configuration: ModelConfiguration) {
         self.tokenizer = tokenizer
         self.configuration = configuration
     }
@@ -29,8 +28,7 @@ struct LLMUserInputProcessor: UserInputProcessor {
             let promptTokens = try tokenizer.applyChatTemplate(messages: messages)
             return LMInput(tokens: MLXArray(promptTokens))
         } catch {
-            // #150 -- it might be a TokenizerError.chatTemplate("No chat template was specified")
-            // but that is not public so just fall back to text
+            // Fall back to direct text encoding if a chat template is not available
             let prompt = input.prompt
                 .asMessages()
                 .compactMap { $0["content"] }
@@ -41,194 +39,235 @@ struct LLMUserInputProcessor: UserInputProcessor {
     }
 }
 
+// MARK: - LLMEvaluator
+
 @Observable
 @MainActor
 class LLMEvaluator {
+
+    // MARK: - Public Variables
+    
+    /// The ID of the model on Hugging Face (e.g., "gpt2", "openlm-research/open_llama_7b", etc.)
+    var modelID: String
+    
+    /// Whether the generator is currently running
     var running = false
+
+    /// The latest text output from the model
     var output = ""
+    
+    /// Information string about the model loading process (e.g., “Downloading 45%”)
     var modelInfo = ""
+    
+    /// Simple stats about the generation (e.g., tokens/second)
     var stat = ""
     
+    // MARK: - Configuration / Parameters
+    
+    /// A base prompt template that your use-case might need.
+    /// This is just an example; feel free to adjust or remove.
     let basePrompt = """
     给出一个主题，请按照给定的主题，切实准确简洁且情感丰富地写一首现代诗：{title}
     """
     
-    // Model configuration setup
-//    let modelConfiguration = LLMModelFactory.shared.modelRegistry.configuration(id: "jerryzhao173985/poems")
-    let modelConfiguration: ModelConfiguration = ModelConfiguration(
-        directory: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("huggingface/models")
-            .appendingPathComponent("jerryzhao173985/poems"),
-        defaultPrompt: "Tell me about the history of Spain."
-    )
-
-    /// parameters controlling the output
+    /// Generation parameters
     let generateParameters = GenerateParameters(temperature: 0)
+    
+    /// Maximum tokens to generate
     let maxTokens = 240
-
-    /// update the display every N tokens -- 4 looks like it updates continuously
-    /// and is low overhead.  observed ~15% reduction in tokens/s when updating
-    /// on every token
+    
+    /// Update the display every N tokens
     let displayEveryNTokens = 4
+    
+    /// Where in local file system to store all downloaded models
+    let localRootDirectory: URL
+    
+    // MARK: - Internal State
 
     enum LoadState {
         case idle
         case loaded(ModelContainer)
     }
+    private var loadState: LoadState = .idle
+    
+    // MARK: - Initializer
 
-    var loadState = LoadState.idle
-    
-    // App-specific local model directory
-    let localModelDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("huggingface/models/jerryzhao173985/poems")
-//    Hugging face hub HubApi: downloadBase
-    let modelStorageDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("huggingface")
-
-    // Function to check if model exists locally
-    func modelExistsLocally() -> Bool {
-        let modelPath = localModelDirectory.appendingPathComponent("model.safetensors")
-        print("Checking if model exists locally at \(modelPath.path)")
-        return FileManager.default.fileExists(atPath: modelPath.path)
-    }
-    
-    
-//    progressHandler: @Sendable @escaping (Progress) -> Void = { _ in }
-    private func _load(
-        configuration: ModelConfiguration,
-        progressHandler: @Sendable @escaping (Progress) -> Void
-    ) async throws -> ModelContext {
-        // load the generic config to unerstand which model and how to load the weights
-        let configurationURL = localModelDirectory.appending(component: "config.json")
-        let baseConfig = try JSONDecoder().decode(BaseConfiguration.self, from: Data(contentsOf: configurationURL))
+    init(modelID: String) {
+        self.modelID = modelID
         
-        let model = try LLMModelFactory.shared.typeRegistry.createModel(configuration: configurationURL, modelType: baseConfig.modelType)
+        // By default, store in: Documents/huggingface/models/<model-id>
+        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        self.localRootDirectory = documentsDir
+            .appendingPathComponent("huggingface/models")
+            .appendingPathComponent(modelID)
+    }
 
-        // apply the weights to the bare model
-        try loadWeights(modelDirectory: localModelDirectory, model: model, quantization: baseConfig.quantization)
+    // MARK: - Model Directory Helpers
 
-        let tokenizer = try await loadTokenizer(configuration: configuration, hub: HubApi(downloadBase: modelStorageDirectory))
+    /// Check if a model is already downloaded locally by verifying the safetensors file exists.
+    private func modelExistsLocally() -> Bool {
+        let weightsURL = localRootDirectory.appendingPathComponent("model.safetensors")
+        return FileManager.default.fileExists(atPath: weightsURL.path)
+    }
 
-        return .init(
-            configuration: configuration, model: model,
-            processor: LLMUserInputProcessor(tokenizer: tokenizer, configuration: configuration),
-            tokenizer: tokenizer)
+    /// Return a `ModelConfiguration` tailored to the local root directory.
+    private func makeModelConfiguration() -> ModelConfiguration {
+        return ModelConfiguration(
+            directory: localRootDirectory,
+            defaultPrompt: "Tell me about the history of Spain."  // or any fallback prompt
+        )
+    }
+
+    // MARK: - Loading the Model
+    
+    /// The main loading function that checks local availability first, otherwise downloads.
+    func load() async throws -> ModelContainer {
+        switch loadState {
+        case .idle:
+            // Restrict GPU memory usage if needed
+            MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
+            
+            let container: ModelContainer
+            if modelExistsLocally() {
+                // Load from local
+                modelInfo = "Loading model from local directory: \(modelID)"
+                container = try await loadModelContainerFromLocal()
+            } else {
+                // Download from Hugging Face
+                modelInfo = "Model not found locally. Downloading: \(modelID)"
+                container = try await downloadAndLoadContainer()
+            }
+            
+            let numParams = await container.perform { $0.model.numParameters() }
+            modelInfo = "Loaded \(modelID). Weights: \(numParams / (1024 * 1024))M"
+            loadState = .loaded(container)
+            return container
+            
+        case .loaded(let container):
+            return container
+        }
     }
     
-    
+    /// Load a model container from local files without any network call.
+    private func loadModelContainerFromLocal() async throws -> ModelContainer {
+        let modelConfiguration = makeModelConfiguration()
+        // A direct approach:
+        // 1. Load all config from the local directory
+        // 2. Create a bare model
+        // 3. Load weights
+        // 4. Create a tokenizer
+        // 5. Return the container
+        return try await ModelContainer(context: loadModelContext(modelConfiguration: modelConfiguration))
+    }
 
-    // Function to load model from local directory
-    func loadModelFromLocal() async throws -> ModelContainer {
-        self.modelInfo = "Loading model from local directory"
+    /// Download from the Hugging Face hub and then load as a container.
+    private func downloadAndLoadContainer() async throws -> ModelContainer {
+        let modelConfiguration = makeModelConfiguration()
+        let hub = HubApi()
         
-        // Load model container from the local directory
-        let modelContainer = try await ModelContainer(context: _load(configuration: modelConfiguration, progressHandler: { _ in }))
-//        LLMModelFactory.shared.loadContainer(hub:hubApi, configuration: modelConfiguration)
-        return modelContainer
-    }
+        // Download model files (json, safetensors, etc.)
+        try await downloadModelFiles(hub: hub, modelID: modelID)
 
-    // Function to check the model remotely using Hub API and download if necessary
-    func checkAndDownloadModel(hub: HubApi) async throws -> URL {
-        let repo = Hub.Repo(id: "jerryzhao173985/poems")
-        let modelFiles = ["*.safetensors", "*.json"]
-        return try await hub.snapshot(from: repo, matching: modelFiles) { progress in
+        // Then load via the factory convenience call
+        // which also sets up tokenizers, weights, etc.
+        return try await LLMModelFactory.shared.loadContainer(
+            configuration: modelConfiguration
+        ) { progress in
             Task { @MainActor in
-                self.modelInfo = "Downloading \(self.modelConfiguration.name): \(Int(progress.fractionCompleted * 100))%"
+                // Show user the download progress
+                self.modelInfo = "Downloading \(self.modelID): \(Int(progress.fractionCompleted * 100))%"
             }
         }
     }
 
-    // Function to download the model if not available locally
-    func downloadModel() async throws -> ModelContainer {
-        let hub = HubApi()
-        self.modelInfo = "Downloading model for \(modelConfiguration.name) from Hugging Face model hub"
-        let modelDirectory = try await checkAndDownloadModel(hub: hub)
-        print("Downloaded model to \(modelDirectory.path)")
-        
-        // After download, load the model from the local directory
-        let modelContainer = try await LLMModelFactory.shared.loadContainer(configuration: modelConfiguration)
-        
-        // You can also perform additional model setup or saving here if needed
-        
-        return modelContainer
-    }
+    // MARK: - Downloading Model Files
 
-    // Load model, check if it's already available or needs to be downloaded
-    func load(hub: HubApi) async throws -> ModelContainer {
-        switch loadState {
-        case .idle:
-          // limit the buffer cache
-          MLX.GPU.set(cacheLimit: 20 * 1024 * 1024)
-          let modelContainer = if modelExistsLocally() {
-              try await loadModelFromLocal()
-          } else {
-              try await downloadModel()
-          }
+    /// Download model files (e.g., *.safetensors, *.json) from the Hugging Face Hub to localRootDirectory.
+    private func downloadModelFiles(hub: HubApi, modelID: String) async throws {
+        let repo = Hub.Repo(id: modelID)
+        let modelFiles = ["*.safetensors", "*.json"]  // Adjust filters as needed
 
-          let numParams = await modelContainer.perform { context in
-              context.model.numParameters()
-          }
-
-          self.modelInfo =
-              "Loaded \(modelConfiguration.id).  Weights: \(numParams / (1024*1024))M"
-          loadState = .loaded(modelContainer)
-          return modelContainer
-        
-        case .loaded(let modelContainer):
-            return modelContainer
+        let _ = try await hub.snapshot(from: repo, matching: modelFiles) { progress in
+            Task { @MainActor in
+                self.modelInfo = "Downloading \(modelID): \(Int(progress.fractionCompleted * 100))%"
+            }
         }
-          
+    }
+    
+    // MARK: - Manually Building a ModelContext
+
+    /// Create a `ModelContext` from local files (configuration, weights, tokenizer).
+    private func loadModelContext(modelConfiguration: ModelConfiguration) async throws -> ModelContext {
+        // 1. Load the base config (to know modelType, quantization, etc.)
+        let configurationURL = modelConfiguration.modelDirectory().appendingPathComponent("config.json")
+        let baseConfig = try JSONDecoder().decode(BaseConfiguration.self, from: Data(contentsOf: configurationURL))
+        
+        // 2. Create an empty model from the base config
+        let model = try LLMModelFactory.shared.typeRegistry.createModel(
+            configuration: configurationURL,
+            modelType: baseConfig.modelType
+        )
+        
+        // 3. Load the weights from disk
+        try loadWeights(modelDirectory: modelConfiguration.modelDirectory(), model: model, quantization: baseConfig.quantization)
+        
+        // 4. Load a tokenizer
+        let tokenizer = try await loadTokenizer(configuration: modelConfiguration, hub: HubApi(downloadBase: modelConfiguration.modelDirectory()))
+        
+        // 5. Construct the processor
+        let processor = LLMUserInputProcessor(tokenizer: tokenizer, configuration: modelConfiguration)
+        
+        // 6. Return the full context
+        return ModelContext(configuration: modelConfiguration, model: model, processor: processor, tokenizer: tokenizer)
     }
 
-    // Function to generate model output based on user input
+    // MARK: - Generating Text
+
+    /// Generate text output by injecting `prompt` into the base prompt template.
     func generate(prompt: String) async {
         guard !running else { return }
-
         running = true
         self.output = ""
 
         do {
-            // Assuming `hub` is available
-            let hub = HubApi() // Initialize the HubApi appropriately
-            let modelContainer = try await load(hub: hub)
-
-            // Create the prompt by interpolating the user input into the base prompt
+            let modelContainer = try await load()
+            // Interpolate the user input into the base prompt, if needed
             let fullPrompt = basePrompt.replacingOccurrences(of: "{title}", with: prompt)
-
-            // Seed the random number generator
+            
+            // Seed the random number generator for reproducible results
             MLXRandom.seed(UInt64(Date.timeIntervalSinceReferenceDate * 1000))
 
+            // Perform generation
             let result = try await modelContainer.perform { context in
                 let input = try await context.processor.prepare(input: .init(prompt: fullPrompt))
                 return try MLXLMCommon.generate(
-                    input: input, parameters: generateParameters, context: context
+                    input: input,
+                    parameters: generateParameters,
+                    context: context
                 ) { tokens in
-                    // Update the output
                     if tokens.count % displayEveryNTokens == 0 {
                         let text = context.tokenizer.decode(tokens: tokens)
                         Task { @MainActor in
                             self.output = text
                         }
                     }
-
-                    if tokens.count >= maxTokens {
-                        return .stop
-                    } else {
-                        return .more
-                    }
+                    
+                    return tokens.count >= maxTokens ? .stop : .more
                 }
             }
-
-            // Update the text if needed
+            
+            // Final output if we haven’t already updated it
             if result.output != self.output {
                 self.output = result.output
             }
+            
+            // Update stats
             self.stat = " Tokens/second: \(String(format: "%.3f", result.tokensPerSecond))"
-
+            
         } catch {
-            output = "Failed: \(error)"
+            self.output = "Failed: \(error)"
         }
 
         running = false
     }
 }
-
