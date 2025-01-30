@@ -8,6 +8,12 @@ import MarkdownUI
 import Metal
 import SwiftUI
 import Tokenizers
+import Hub
+
+
+// Model configuration setup
+let modelStorageDirectory: URL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("huggingface")
+let hubApi = HubApi(downloadBase: modelStorageDirectory)
 
 struct ContentView: View {
 
@@ -20,7 +26,7 @@ struct ContentView: View {
         var id: Self { self }
     }
 
-    @State private var selectedDisplayStyle = displayStyle.markdown
+    @State private var selectedDisplayStyle = displayStyle.plain
     
     // Controls the ephemeral "Copied!" animation
     @State private var showCopyConfirmation = false
@@ -36,6 +42,13 @@ struct ContentView: View {
 
                     Text(llm.stat)
                 }
+                // make it of a smaller font size
+                .font(.caption)
+                .padding(.bottom, 5)
+                // make it look nicer
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(8)
+                
                 HStack {
                     Spacer()
                     if llm.running {
@@ -165,10 +178,10 @@ struct ContentView: View {
 
         }
         .task {
-            self.prompt = llm.modelConfiguration.defaultPrompt
+            self.prompt = "高跟鞋" /*llm.modelConfiguration.defaultPrompt*/
 
             // pre-load the weights on launch to speed up the first generation
-            _ = try? await llm.load()
+            _ = try? await llm.load(hub: hubApi)
         }
     }
 
